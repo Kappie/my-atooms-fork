@@ -9,7 +9,6 @@ docs/tutorial/*png
 # Ignore version file in package.
 # It will be updated upon build/install
 atooms/core/_commit.py
-atooms/plugins/[a-zA-Z]*
 
 env
 env3

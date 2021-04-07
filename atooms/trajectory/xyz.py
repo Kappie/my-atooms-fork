@@ -144,6 +144,8 @@ class TrajectoryXYZ(TrajectoryBase):
             # Redefine fields
             self._setup_fields()
 
+        self.precision = 15
+
     def _setup_fields(self):
         """
         Redefine fields.

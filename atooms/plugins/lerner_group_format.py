@@ -13,6 +13,7 @@ from atooms.trajectory.utils import gopen
 from atooms.trajectory.base import canonicalize_fields
 
 import logging
+import os
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class TrajectoryLerner(TrajectoryBase):
     """
     Trajectory implementing the Lerner group's format.
     """
-    suffix = 'dat'
+    suffix = '.lerner'
     fields_default = ['id', 'pos']
 
 
@@ -31,7 +32,12 @@ class TrajectoryLerner(TrajectoryBase):
 
         # Trajectory file handle
         self.mode = mode
-        self.trajectory = gopen(self.filename, self.mode)
+        # Filename is actually a folder, in which we'll save snaps in separate files. 
+        self.trajectory = open(self.filename)
+        if mode == "w":
+            os.makedirs(self.trajectory, exist_ok=True)
+        # Since there is no timestep information in the Lerner format, we just enumerate the frames in the trajectory, i.e. we create 0.dat, 1.dat, etc.
+        self.current_step = 0
 
         if mode == 'w':
             self.fields = copy(self.fields_default) if fields is None else fields
@@ -108,25 +114,30 @@ class TrajectoryLerner(TrajectoryBase):
         """ returns System instance. """
 
         L = self.header[0]
-        cell = Cell(side=[L, L, L])
+        if self.ndim == 3:
+            cell = Cell(side=[L, L, L])
+        elif self.ndim == 2:
+            cell = Cell(side=[L, L])
 
         N = self.data.shape[0]
         pos = self.data[:, :self.ndim]
         # Lerner group format has positions from [0, 1).
         pos = pos*L - L/2
-        # In 2D, we add a zero z-coordinate to be consistent with other formats.
-        if self.ndim == 3:
-            # First ndim columns are always the position.
-            if self.velocity_present:
-                # Next is the velocity, if it exists.
-                vel = self.data[:, self.ndim:2*self.ndim]
-        elif self.ndim == 2:
-            new_pos = np.zeros((N, 3)).astype(float)
-            new_pos[:, :self.ndim] = pos
-            pos = new_pos
-            if self.velocity_present:
-                vel = np.zeros((N, 3)).astype(float)
-                vel[:, :self.ndim] = self.data[:, self.ndim:2*self.ndim]
+
+        if self.velocity_present:
+            # Next is the velocity, if it exists.
+            vel = self.data[:, self.ndim:2*self.ndim]
+
+        # # In 2D, we add a zero z-coordinate to be consistent with other formats.
+        # if self.ndim == 3:
+        #     # First ndim columns are always the position.
+        # elif self.ndim == 2:
+        #     new_pos = np.zeros((N, 3)).astype(float)
+        #     new_pos[:, :self.ndim] = pos
+        #     pos = new_pos
+        #     if self.velocity_present:
+        #         vel = np.zeros((N, 3)).astype(float)
+        #         vel[:, :self.ndim] = self.data[:, self.ndim:2*self.ndim]
 
         particles = []
         for i in range(N):
@@ -195,11 +206,12 @@ class TrajectoryLerner(TrajectoryBase):
             fmt += " %s"
 
         data = np.column_stack(columns)
-
         ncols = data.shape[1]
         header = "%.12g" % L
-        for i in range(ncols):
+        for i in range(ncols - 1):
             header += " 0"
 
-        np.savetxt(self.trajectory, data, fmt=fmt, header=header, comments='')
+        out_file = "%s/%d.dat" % (self.trajectory, self.current_step)
+        np.savetxt(out_file, data, fmt=fmt, header=header, comments='')
+        self.current_step += 1
 

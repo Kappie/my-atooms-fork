@@ -38,6 +38,11 @@ class TrajectoryGSD(TrajectoryBase):
     def read_sample(self, frame):
         """ returns System instance. """
         snap = self.trajectory[frame]
+        # HOOMD convention in 2D.
+        if snap.configuration.box[2] == 1.0:
+            ndim = 2
+        else:
+            ndim = 3
 
         # Convert typeid from [0, 0, 1, ...] to ['A', 'A', 'B', ...] when snap.particles.types = ['A', 'B']
         distinct_species = snap.particles.types
@@ -46,7 +51,7 @@ class TrajectoryGSD(TrajectoryBase):
         for i in distinct_typeids:
             typeid_to_species[i] = distinct_species[i]
 
-        box = snap.configuration.box[:3]    # atooms does not handle sheared boxes.
+        box = snap.configuration.box[:ndim]    # atooms does not handle sheared boxes.
         cell = Cell(side=box)
 
         N = snap.particles.position.shape[0]
@@ -55,10 +60,11 @@ class TrajectoryGSD(TrajectoryBase):
             p = Particle(
                 mass     = snap.particles.mass[i],
                 species  = typeid_to_species[ snap.particles.typeid[i] ],
-                position = snap.particles.position[i, :],
-                velocity = snap.particles.velocity[i, :],
-                radius   = snap.particles.diameter / 2
+                position = snap.particles.position[i, :ndim],
+                velocity = snap.particles.velocity[i, :ndim],
+                radius   = snap.particles.diameter[i] / 2,
             )
+            p.image = snap.particles.image[i, :ndim]
             particles.append(p)
 
         return System(particle=particles, cell=cell)
@@ -69,8 +75,15 @@ class TrajectoryGSD(TrajectoryBase):
 
         data  = system.dump(['pos', 'vel', 'spe', 'particle.mass', 'particle.radius'])
         box = system.cell.side
+        # HOOMD convention for 2D.
+        if box.shape[0] == 2 or box[2] == 1.:
+            ndim = 2
+        else:
+            ndim = 3
+
         N = len(system.particle)
         distinct_species = system.distinct_species()
+
 
         # Convert species from ['A', 'A', 'B', ...] to [0, 0, 1, ...] when distinct_species = ['A', 'B']
         species_to_typeid = {}
@@ -79,17 +92,28 @@ class TrajectoryGSD(TrajectoryBase):
             species_to_typeid[species] = typeid
             typeid += 1
 
-        pos = data['particle.position']
-        vel = data['particle.velocity']
+        pos = data['particle.position'][:, :ndim]
+        vel = data['particle.velocity'][:, :ndim]
         species = data['particle.species']    # This is 'A', 'A', 'B', etc when distinct_species = ['A', 'B']
         mass = data['particle.mass']
         radius = data['particle.radius']
         convert_to_typeid = np.vectorize( lambda species: species_to_typeid[species] )
         typeid = convert_to_typeid(species).astype(int) # This is 0, 0, 1, etc when distinct_species = ['A', 'B']
 
+        # HOOMD conventions in 2D.
+        if ndim == 2:
+            box = np.array([box[0], box[1], 1.0])
+            new_pos = np.zeros((N, 3))
+            new_pos[:, :2] = pos
+            pos = new_pos
+            new_vel = np.zeros((N, 3))
+            new_vel[:, :2] = vel
+            vel = new_vel
+
         snap = gsd.hoomd.Snapshot()
         snap.configuration.box = [box[0], box[1], box[2], 0, 0, 0] # Assume all strains 0.
         snap.configuration.step = step
+        snap.configuration.dimensions = ndim
         snap.particles.types = distinct_species
         snap.particles.N = N
 
